@@ -2,13 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gf_base2.h"
+
 struct gf_base2 {
     uint32_t m;     // degree of GF (limited to 8 due to choice of uint8_t)
     uint32_t g;     // coefficients of irreducible polynomial g(x)
     uint32_t order; // number of elements in this Galois Field
 
     uint8_t * mult_tbl;     //multiplcation table
-    uint8_t * mult_inv_tbl; //mlutiplicative inverse table
+    uint8_t * mult_inv_tbl; //multiplicative inverse table
 };
 
 /* static struct for functions in this file only */
@@ -70,6 +72,8 @@ gf_init(const uint32_t m, const uint32_t g) {
         return -1;
     }
 
+    printf("Initializing GF(2^%d)...\n", m);
+
     memset(&gf, 0, sizeof(gf));
     
     gf.m = m;
@@ -106,6 +110,8 @@ gf_init(const uint32_t m, const uint32_t g) {
         }
     }
 
+    printf("GF(2^%d) initialization completed.\n\n", m);
+    
     return 0;
 }
 
@@ -189,3 +195,177 @@ gf_print_mult_inv_tbl() {
     printf("\n");
 }
 
+struct gf_matrix *
+gf_matrix_create(int rows, int cols) {
+    const char * mem_err =
+        "Error allocating memory. Matrix initialization failed.";
+
+    int m_size = sizeof(uint8_t) * rows * cols;
+    
+    struct gf_matrix * m = malloc(sizeof(struct gf_matrix));
+    if (!m) {
+        printf("%s\n", mem_err);
+        return NULL;
+    }
+
+    memset(m, 0, sizeof(struct gf_matrix));
+
+    m->rows = rows;
+    m->cols = cols;
+
+    m->v = malloc(m_size);
+    if (!m->v) {
+        printf("%s\n", mem_err);
+        return NULL;
+    }
+
+    memset(m->v, 0, m_size);
+
+    return m;
+}
+
+struct gf_matrix *
+gf_matrix_create_from(struct gf_matrix * x) {
+    struct gf_matrix * m = gf_matrix_create(x->rows, x->cols);
+
+    if (!m)
+        return NULL;
+
+    for (int i = 0; i < x->rows * x-> cols; i++)
+        m->v[i] = x->v[i];
+
+    return m;
+}
+
+void
+gf_matrix_delete(struct gf_matrix * m) {
+    if (m) {
+        if (m->v)
+            free(m->v);
+        free(m);
+    }
+}
+
+void
+gf_matrix_identity_set(struct gf_matrix * x) {
+    int n = (x->rows < x->cols) ? x->rows : x->cols;
+
+    for (int r = 0; r < n; r++)
+        for (int c = 0; c < n; c++)
+            x->v[r * x->cols + c] = (r == c) ? 1 : 0;
+}
+
+uint8_t
+gf_matrix_dot_prod(struct gf_matrix * x,
+                   struct gf_matrix * y,
+                   int row,
+                   int col) {
+    uint8_t res = 0;
+    uint8_t prod = 0;
+
+    for (int i = 0; i < x->cols; i++) {
+        prod = gf_mult(x->v[row * x->cols + i], y->v[i * y->cols + col]);
+        res = gf_add(res, prod);
+    }
+
+    return res;
+}
+
+int
+gf_matrix_mult(struct gf_matrix * x,
+               struct gf_matrix * y,
+               struct gf_matrix * prod) {
+    if (x->cols != y->rows) {
+        printf("Invalid dimensions for matrix multiplication.\n");
+        return -1;
+    }
+
+    if (x->rows != prod->rows || y->cols != prod->cols) {
+        printf("Incorrect matrix dimensions to hold product..\n");
+        return -1;
+    }
+
+    for (int i = 0; i < x->rows; i++)
+        for (int j = 0; j < y->cols; j++)
+            prod->v[i * prod->cols + j] = gf_matrix_dot_prod(x, y, i, j);
+
+    return 0;
+}
+
+void
+gf_matrix_swap_rows(struct gf_matrix * x, int row1, int row2) {
+    uint8_t temp = 0;
+
+    for (int i = 0; i < x->cols; i++) {
+        temp = x->v[row1 * x->cols + i];
+        x->v[row1 * x->cols + i] = x->v[row2 * x->cols + i];
+        x->v[row2 * x->cols + i] = temp;
+    }
+}
+
+int
+gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
+    int rc = 0;
+    uint8_t mult_inv = 0;
+    uint8_t scale = 0;
+    int idx = 0;
+    int col = 0;
+    int row = 0;
+    int row2 = 0;
+
+    if (x->rows != x->cols) {
+        printf("Non-sqaure matrices are singular.\n");
+        return -1;
+    }
+    
+    // make a copy of x so we don't modify the original
+    struct gf_matrix * m = gf_matrix_create_from(x);
+
+    gf_matrix_identity_set(inv);
+
+    for (row = 0; row < m->rows; row++) {
+        // if the pivote is zero, find another row to swap
+        if (m->v[row * m->cols + row] == 0) {
+            for (row2 = row + 1; row2 < m->rows; row2++) {
+                if (m->v[row2 * m->cols + row2]) {
+                    gf_matrix_swap_rows(m, row, row2);
+                    gf_matrix_swap_rows(inv, row, row2);
+                    break;
+                }
+            }
+        }
+        
+        if (m->v[row * m->cols + row] == 0) {
+            printf("Cannot find inverse for matrix.\n");
+            rc = -1;
+            goto inv_err;
+        }
+
+        // scale row i so pivot is 1
+        mult_inv = gf_mult_inv(m->v[row * m->cols + row]);
+        for (col = 0; col < m->cols; col++) {
+            idx = row + m->cols + col;
+            m->v[idx] = gf_mult(mult_inv, m->v[idx]);
+            inv->v[idx] = gf_mult(mult_inv, inv->v[idx]);
+        }
+
+        // zero out the ith column in other rows
+        for (row2 = 0; row2 < m->rows; row2++) {
+            // skip the current row
+            if (row2 == row)
+                continue;
+
+            scale = m->v[row2 * m->cols + row];
+            for (col = 0; col < m->cols; col++) {
+                m->v[row2 * m->cols + col]
+                    = gf_add(m->v[row2 * m->cols + col], gf_mult(scale, m->v[row * m->cols + col]));
+                inv->v[row2 * inv->cols + col]
+                    = gf_add(inv->v[row2 * inv->cols + col], gf_mult(scale, inv->v[row * inv->cols + col]));
+            }
+        }
+    } // for each row in the original matrix
+
+inv_err:
+    gf_matrix_delete(m);
+    return rc;
+}

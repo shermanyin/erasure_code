@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
     int rc = gf_init(m, g);
 
     if (rc) {
-        printf("Error initializing gf.\n");
+        printf("Error initializing Galois Field.\n");
         exit(1);
     }
 
