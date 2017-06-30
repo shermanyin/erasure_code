@@ -334,8 +334,11 @@ gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
     gf_matrix_identity_set(inv);
 
     for (row = 0; row < m->rows; row++) {
-        // if the pivote is zero, find another row to swap
-        if (m->v[row * m->cols + row] == 0) {
+        // index of the pivot
+        int pivot = row * m->cols + row;
+
+        // if the pivot is zero, find another row to swap
+        if (!m->v[pivot]) {
             for (row2 = row + 1; row2 < m->rows; row2++) {
                 if (m->v[row2 * m->cols + row]) {
                     gf_matrix_swap_rows(m, row, row2);
@@ -345,20 +348,26 @@ gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
             }
         }
         
-        if (m->v[row * m->cols + row] == 0) {
-            printf("Cannot find inverse for the following matrix:\n");
-            gf_matrix_print(m);
-            rc = -1;
-            goto inv_err;
-        }
+        switch (m->v[pivot]) {
+            case 0:
+                printf("Cannot find inverse for the following matrix:\n");
+                gf_matrix_print(m);
+                rc = -1;
+                goto inv_err;
 
-        // scale row i so pivot is 1
-        mult_inv = gf_mult_inv(m->v[row * m->cols + row]);
-        for (col = 0; col < m->cols; col++) {
-            idx = row * m->cols + col;
-            m->v[idx] = gf_mult(mult_inv, m->v[idx]);
-            inv->v[idx] = gf_mult(mult_inv, inv->v[idx]);
-        }
+            case 1:
+                // no-op
+                break;
+
+            default:
+                // scale row i so pivot is 1
+                mult_inv = gf_mult_inv(m->v[pivot]);
+                for (col = 0; col < m->cols; col++) {
+                    idx = row * m->cols + col;
+                    m->v[idx] = gf_mult(mult_inv, m->v[idx]);
+                    inv->v[idx] = gf_mult(mult_inv, inv->v[idx]);
+                }
+        } // switch pivot value
 
         // zero out the ith column in other rows
         for (row2 = 0; row2 < m->rows; row2++) {
