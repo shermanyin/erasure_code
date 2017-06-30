@@ -27,15 +27,16 @@ gf_cleanup() {
 
 uint8_t
 gf_long_mult(uint8_t x, uint8_t y) {
+    uint32_t yy = y; // may need to shift y to left
     uint32_t prod = 0;
     uint32_t g_msb = 1 << gf.m;
 
     // Multiply
     while (x) {
         if (x & 1)
-            prod ^= y;
+            prod ^= yy;
         x >>= 1;
-        y <<= 1;
+        yy <<= 1;
     }
 
     // Reduce by g(x)
@@ -145,6 +146,15 @@ gf_pow(uint8_t x, uint8_t y) {
 }
 
 void
+gf_matrix_print(struct gf_matrix * x) {
+    for (int i = 0; i < x->rows; i++) {
+        for (int j = 0; j < x->cols; j++)
+            printf("%02x ", x->v[i * x->cols + j]);
+        printf("\n");
+    }
+}
+
+void
 gf_print_mult_tbl() {
     int i = 0;
     int j = 0;
@@ -238,11 +248,11 @@ gf_matrix_create_from(struct gf_matrix * x) {
 }
 
 void
-gf_matrix_delete(struct gf_matrix * m) {
-    if (m) {
-        if (m->v)
-            free(m->v);
-        free(m);
+gf_matrix_delete(struct gf_matrix * x) {
+    if (x) {
+        if (x->v)
+            free(x->v);
+        free(x);
     }
 }
 
@@ -317,7 +327,7 @@ gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
         printf("Non-sqaure matrices are singular.\n");
         return -1;
     }
-    
+
     // make a copy of x so we don't modify the original
     struct gf_matrix * m = gf_matrix_create_from(x);
 
@@ -327,7 +337,7 @@ gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
         // if the pivote is zero, find another row to swap
         if (m->v[row * m->cols + row] == 0) {
             for (row2 = row + 1; row2 < m->rows; row2++) {
-                if (m->v[row2 * m->cols + row2]) {
+                if (m->v[row2 * m->cols + row]) {
                     gf_matrix_swap_rows(m, row, row2);
                     gf_matrix_swap_rows(inv, row, row2);
                     break;
@@ -336,7 +346,8 @@ gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
         }
         
         if (m->v[row * m->cols + row] == 0) {
-            printf("Cannot find inverse for matrix.\n");
+            printf("Cannot find inverse for the following matrix:\n");
+            gf_matrix_print(m);
             rc = -1;
             goto inv_err;
         }
@@ -344,7 +355,7 @@ gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
         // scale row i so pivot is 1
         mult_inv = gf_mult_inv(m->v[row * m->cols + row]);
         for (col = 0; col < m->cols; col++) {
-            idx = row + m->cols + col;
+            idx = row * m->cols + col;
             m->v[idx] = gf_mult(mult_inv, m->v[idx]);
             inv->v[idx] = gf_mult(mult_inv, inv->v[idx]);
         }

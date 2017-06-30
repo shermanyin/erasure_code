@@ -32,7 +32,9 @@ struct gf_matrix * gf_matrix_create(int rows, int cols);
 
 struct gf_matrix * gf_matrix_create_from(struct gf_matrix * x);
 
-void gf_matrix_delete(struct gf_matrix * m);
+void gf_matrix_delete(struct gf_matrix * x);
+
+void gf_matrix_print(struct gf_matrix * x);
 
 /*
  * Generates an identity matrix in the given matrix. If the matrix is not a

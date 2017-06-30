@@ -2,11 +2,14 @@
 #define ERASURE_CODE_H
 
 #include <stdint.h>
+
 /*
  * Initialize erasure code encoder/decoder
  *
  * k (IN):  number of input bytes to encode at a time
  * p (IN):  number of parity bytes to generate from the k input bytes
+ *
+ * returns: 0 if success, non-zero if failed
  */
 int ec_init(const uint32_t k, const uint32_t p);
 
@@ -36,13 +39,13 @@ int ec_encode(uint8_t * input, uint8_t * parity);
  *               positions of the input bytes during EC encoding, must be length
  *               k
  * result (OUT): array of k recovered original data bytes
- * 
+ *
  * Example:
  * Assume k = 3, p = 2, and the encoding result was [a b c d e], where [a b c]
  * is the original data, and [d e] are the parity bytes.  If c and d are lost,
- * then the input array to this function should be [a b e], the indicies array
+ * then the input array to this function should be [a b e], the indices array
  * should be [0 1 4].  After decoding, orig array will contain [a b c].
  */
-int ec_decode(uint8_t * input, bool * indices, uint8_t * result);
+int ec_decode(uint8_t * input, int * indices, uint8_t * result);
 
 #endif

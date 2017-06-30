@@ -1,4 +1,3 @@
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,7 +41,7 @@ ec_init(const uint32_t k, const uint32_t p) {
     ec.p = p;
     ec.n = k + p;
 
-    ec.matrix = gf_matrix_create(ec.k, ec.n);
+    ec.matrix = gf_matrix_create(ec.n, ec.k);
     if (!ec.matrix) {
         printf("Failed to create matrix.\n");
         ec_cleanup();
@@ -58,6 +57,8 @@ ec_init(const uint32_t k, const uint32_t p) {
     }
 
     cauchy_matrix_gen(ec.matrix);
+
+    printf("Erasure Code module initialized.\n");
 
     return 0;
 }
@@ -91,7 +92,7 @@ ec_encode(uint8_t * input, uint8_t * parity) {
 }
 
 int
-ec_decode(uint8_t * input, bool * indices, uint8_t * result) {
+ec_decode(uint8_t * input, int * indices, uint8_t * result) {
     int rc = 0;
     int row = 0;
 
@@ -131,4 +132,3 @@ decode_err:
 
     return rc;
 }
-
