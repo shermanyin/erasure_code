@@ -1,5 +1,5 @@
+#include <pthread.h>
 #include <semaphore.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,11 +7,12 @@
 struct queue {
     size_t entry_size;
     int depth;
-    uint8_t * buffer;
+    int * buffer;
     int head;
     int tail;
     sem_t sem_space;    // has space in queue
     sem_t sem_work;     // has work in queue
+    pthread_mutex_t lock;
 };
 
 struct queue *
@@ -55,11 +56,21 @@ queue_init(size_t entry_size, int depth) {
         return 0;
     }
     
+    rc = pthread_mutex_init(&q->lock, NULL);
+    if (rc) {
+        printf("Error initializing mutex. Error=%d.\n", rc);
+        free(q);
+        free(q->buffer);
+    }
+    
     return q;
 }
 
 void
 queue_cleanup(struct queue * q) {
+    if (!q)
+        return;
+
     sem_destroy(&q->sem_work);
     sem_destroy(&q->sem_space);
     free(q->buffer);
@@ -67,25 +78,27 @@ queue_cleanup(struct queue * q) {
 }
 
 void
-queue_put(struct queue * q, uint8_t * entry) {
+queue_put(struct queue * q, int * entry) {
     sem_wait(&q->sem_space);
+    pthread_mutex_lock(&q->lock);
 
     memcpy(&q->buffer[q->entry_size * q->tail], entry, q->entry_size);
-
     q->tail = (q->tail + 1) % q->depth;
 
+    pthread_mutex_unlock(&q->lock);
     sem_post(&q->sem_work);
 }
 
 void
-queue_get(struct queue * q, uint8_t * entry) {
+queue_get(struct queue * q, int * entry) {
 
     sem_wait(&q->sem_work);
+    pthread_mutex_lock(&q->lock);
 
     memcpy(entry, &q->buffer[q->entry_size * q->head], q->entry_size);
     memset(&q->buffer[q->entry_size * q->head], 0, q->entry_size);
-
     q->head = (q->head + 1) % q->depth;
 
+    pthread_mutex_unlock(&q->lock);
     sem_post(&q->sem_space);
 }

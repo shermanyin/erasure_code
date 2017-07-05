@@ -4,13 +4,13 @@ all : encode_decode gf_tables exhaustive_ec_test
 encode_decode: encode_decode.o erasure_code.o gf_base2.o
 	gcc -o encode_decode encode_decode.o erasure_code.o gf_base2.o
 
-gf_tables : gf_tables.o gf_base2.o gf_base2.h
+gf_tables : gf_tables.o gf_base2.o
 	gcc -o gf_tables gf_tables.o gf_base2.o
 
-exhaustive_ec_test : exhaustive_ec_test.o erasure_code.h erasure_code.o gf_base2.o
-	gcc -o exhaustive_ec_test exhaustive_ec_test.o erasure_code.o gf_base2.o
+exhaustive_ec_test : exhaustive_ec_test.o erasure_code.o gf_base2.o queue.o
+	gcc -pthread -o exhaustive_ec_test exhaustive_ec_test.o erasure_code.o gf_base2.o queue.o
 
-exhaustive_ec_test.o : exhaustive_ec_test.c
+exhaustive_ec_test.o : exhaustive_ec_test.c erasure_code.h queue.h
 	gcc -c exhaustive_ec_test.c
 
 encode_decode.o : encode_decode.c erasure_code.h
