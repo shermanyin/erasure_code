@@ -7,8 +7,8 @@ encode_decode: encode_decode.o erasure_code.o gf_base2.o
 gf_tables : gf_tables.o gf_base2.o gf_base2.h
 	gcc -o gf_tables gf_tables.o gf_base2.o
 
-exhaustive_ec_test : exhaustive_ec_test.o
-	gcc -o exhaustive_ec_test exhaustive_ec_test.o
+exhaustive_ec_test : exhaustive_ec_test.o erasure_code.h erasure_code.o gf_base2.o
+	gcc -o exhaustive_ec_test exhaustive_ec_test.o erasure_code.o gf_base2.o
 
 exhaustive_ec_test.o : exhaustive_ec_test.c
 	gcc -c exhaustive_ec_test.c

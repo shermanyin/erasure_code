@@ -1,7 +1,9 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-//#include "erasure_code.h"
+#include <unistd.h>
+#include "erasure_code.h"
 
 #define PROG_NAME "exhaustive_ec_test"
 
@@ -12,6 +14,8 @@ const char * usage =
 "p: number of parity bytes to generate\n"
 "l: number of bytes loss\n"
 "Example: " PROG_NAME " 4 2 2\n\n";
+
+const char * mem_err = "Error allocating memory.";
 
 void print_array(int * a, size_t len) {
     for (int i = 0; i < len; i++)
@@ -24,7 +28,6 @@ void print_array8(uint8_t * a, size_t len) {
         printf("%2x, ", (int)a[i]);
     printf("\n");
 }
-
 
 /*
  * Generate all combinations in the set n choose r, then run the specified 
@@ -66,85 +69,135 @@ void print_res(int * array, int len, void * arg) {
     printf("\n");
 }
 
+void * decode_one(void * idx) {
+    int * loss_idx = idx;
+
+    printf("This is thread %d\n", (*loss_idx)++); 
+    return 0;
+}
+
+void rand_data_gen(uint8_t * data, size_t len) {
+    srand(time(NULL));
+
+    for (int i = 0; i < len; i++)
+        data[i] = (uint8_t) (rand() % (UINT8_MAX + 1));
+}
+
 int main(int argc, char* argv[]) {
     uint32_t k = 0;
     uint32_t p = 0;
-    int rc = 0;
+    uint32_t l = 0;
     uint8_t * ec_code = 0;
-    uint8_t * parity = 0;
     uint8_t * input = 0;
-    int * indices = 0;
     uint8_t * result = 0;
-    size_t sz8 = 0;
+    int * indices = 0;
+    int * loss_idx = 0;
     int i = 0;
+    int nprocs = 0;
+    int rc = 0;
 
-    if (argc != 3) {
-        printf("Requires 2 parameters.\n\n");
+    if (argc != 4) {
+        printf("Requires 3 parameters.\n\n");
         printf("%s\n\n", usage);
         exit(1);
     }
 
-    srand(time(NULL));
-
     k = atoi(argv[1]);
     p = atoi(argv[2]);
+    l = atoi(argv[3]);
 
-    int * temp = malloc(sizeof(int) * p);
-    combination(k, p, temp, 0, 0, &print_res, NULL);
-    free(temp);
-    return 0;
-
-   /* 
+    // init erasure code module
     rc = ec_init(k, p);
-
     if (rc) {
         printf("Error initializing Erasure Code.\n");
         exit(1);
     }
 
-    sz8 = sizeof(uint8_t);
-    
-    ec_code = malloc(sz8 * (k + p));
+    // Generate random data and calculate parity
+    ec_code = malloc(sizeof(*ec_code) * (k + p));
     if (!ec_code) {
-        printf("Error allocating memory.\n");
+        printf("%s\n", mem_err);
         rc = -1;
         goto err;
     }
 
-    input = malloc(sz8 * k);
-    if (!input) {
-        printf("Error allocating memory.\n");
-        rc = -1;
-        goto err;
-    }
+    rand_data_gen(ec_code, k);
 
-    indices = malloc(sizeof(int) * k);
-    if (!indices) {
-        printf("Error allocating memory.\n");
-        rc = -1;
-        goto err;
-    }
-
-    result = malloc(sz8 * k);
-    if (!result) {
-        printf("Error allocating memory.\n");
-        rc = -1;
-        goto err;
-    }
-
-    parity = ec_code;
-
-    // Random source data
-    for (i = 0; i < k; i++, parity++)
-        ec_code[i] = (uint8_t) (rand() % (UINT8_MAX + 1));
+    rc = ec_encode(ec_code, ec_code + k);
 
     printf("Original data: ");
     print_array8(ec_code, k);
 
-    rc = ec_encode(ec_code, parity);
-
     printf("Erasure Code: ");
     print_array8(ec_code, k + p);
+
+    input = malloc(sizeof(*input) * k);
+    if (!input) {
+        printf("%s\n", mem_err);
+        rc = -1;
+        goto err;
+    }
+
+    indices = malloc(sizeof(*indices) * k);
+    if (!indices) {
+        printf("%s\n", mem_err);
+        rc = -1;
+        goto err;
+    }
+
+    result = malloc(sizeof(*result) * k);
+    if (!result) {
+        printf("%s\n", mem_err);
+        rc = -1;
+        goto err;
+    }
+
+    // init queue
+
+    // init mutex
+    
+    // init semaphore
+    
+    // start threads
+    nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+    printf("start %d threads\n", nprocs);
+
+    int a = 0;
+    pthread_t * threads = malloc(sizeof(*threads) * nprocs);
+    for (i = 0; i < nprocs; i++) {
+        pthread_create(&threads[i], NULL, decode_one, &a);
+    }
+
+    // generate combinations and signal to threads
+    printf("combinations\n");
+    loss_idx = malloc(sizeof(*loss_idx) * p);
+    if (!loss_idx) {
+        printf("%s\n", mem_err);
+        rc = -1;
+        goto err;
+    }
+
+    combination(k, p, loss_idx, 0, 0, &print_res, NULL);
+
+    // join threads
+    printf("join threads\n");
+    for (i = 0; i < nprocs; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+err:
+    // clean up
+    free(loss_idx);
+    free(result);
+    free(indices);
+    free(input);
+    free(ec_code);
+    ec_cleanup();
+
+    return rc;
+}
+
+#if 0
 
     // Pick k bytes out of the erasure code
     for (i = 0; i < k; i++) {
@@ -184,13 +237,5 @@ int main(int argc, char* argv[]) {
     printf("Decode successful!\n");
 
 
-err:
-    free(result);
-    free(indices);
-    free(input);
-    free(ec_code);
-    ec_cleanup();
-
-    return rc;
-    */
 }
+#endif
