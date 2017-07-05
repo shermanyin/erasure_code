@@ -4,6 +4,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "erasure_code.h"
+#include "queue.h"
 
 #define PROG_NAME "exhaustive_ec_test"
 
@@ -16,6 +17,8 @@ const char * usage =
 "Example: " PROG_NAME " 4 2 2\n\n";
 
 const char * mem_err = "Error allocating memory.";
+
+pthread_mutex_t queue_lock;
 
 void print_array(int * a, size_t len) {
     for (int i = 0; i < len; i++)
@@ -72,7 +75,9 @@ void print_res(int * array, int len, void * arg) {
 void * decode_one(void * idx) {
     int * loss_idx = idx;
 
+    pthread_mutex_lock(&queue_lock);
     printf("This is thread %d\n", (*loss_idx)++); 
+    pthread_mutex_unlock(&queue_lock);
     return 0;
 }
 
@@ -93,7 +98,7 @@ int main(int argc, char* argv[]) {
     int * indices = 0;
     int * loss_idx = 0;
     int i = 0;
-    int nprocs = 0;
+    int num_threads = 0;
     int rc = 0;
 
     if (argc != 4) {
@@ -155,21 +160,30 @@ int main(int argc, char* argv[]) {
     // init queue
 
     // init mutex
+    rc = pthread_mutex_init(&queue_lock, NULL);
+    if (rc) {
+        printf("Error initializing mutex. Error=%d.\n", rc);
+        goto err;
+    }
     
     // init semaphore
     
     // start threads
-    nprocs = sysconf(_SC_NPROCESSORS_ONLN);
-    printf("start %d threads\n", nprocs);
+    num_threads = sysconf(_SC_NPROCESSORS_ONLN) - 1;
+    printf("start %d threads\n", num_threads);
 
     int a = 0;
-    pthread_t * threads = malloc(sizeof(*threads) * nprocs);
-    for (i = 0; i < nprocs; i++) {
-        pthread_create(&threads[i], NULL, decode_one, &a);
+    pthread_t * threads = malloc(sizeof(*threads) * num_threads);
+    for (i = 0; i < num_threads; i++) {
+        rc = pthread_create(&threads[i], NULL, decode_one, &a);
+        if (rc) {
+            printf("Error creating thread. (error=%d)\n", rc);
+            goto err;
+        }
     }
 
     // generate combinations and signal to threads
-    printf("combinations\n");
+    printf("generate combinations\n");
     loss_idx = malloc(sizeof(*loss_idx) * p);
     if (!loss_idx) {
         printf("%s\n", mem_err);
@@ -181,7 +195,7 @@ int main(int argc, char* argv[]) {
 
     // join threads
     printf("join threads\n");
-    for (i = 0; i < nprocs; i++) {
+    for (i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
 
