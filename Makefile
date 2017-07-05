@@ -16,6 +16,9 @@ exhaustive_ec_test.o : exhaustive_ec_test.c
 encode_decode.o : encode_decode.c erasure_code.h
 	gcc -c encode_decode.c
 
+queue.o : queue.c
+	gcc -c queue.c
+
 gf_tables.o : gf_tables.c gf_base2.h
 	gcc -c gf_tables.c
 
