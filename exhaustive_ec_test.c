@@ -133,8 +133,8 @@ void * status(void * arg) {
         failed = res.failed;
         pthread_mutex_unlock(&res.lock);
 
-        printf("%lu passed, %lu failed, %lu total. %0.1f%% complete.\n",
-            passed, failed, total, (double)((passed + failed) / total * 100));
+        printf("%lu passed, %lu failed, %lu total. %0.3f%% complete.\n",
+            passed, failed, total, ((double)(passed + failed) / total * 100));
 
         if (passed + failed >= total) {
             // We're done
