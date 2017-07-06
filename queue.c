@@ -7,7 +7,7 @@
 struct queue {
     size_t entry_size;
     int depth;
-    int * buffer;
+    unsigned char * buffer;
     int head;
     int tail;
     sem_t sem_space;    // has space in queue
@@ -78,7 +78,7 @@ queue_cleanup(struct queue * q) {
 }
 
 void
-queue_put(struct queue * q, int * entry) {
+queue_put(struct queue * q, void * entry) {
     sem_wait(&q->sem_space);
     pthread_mutex_lock(&q->lock);
 
@@ -90,9 +90,29 @@ queue_put(struct queue * q, int * entry) {
 }
 
 void
-queue_get(struct queue * q, int * entry) {
+queue_get(struct queue * q, void * entry) {
 
     sem_wait(&q->sem_work);
+    pthread_mutex_lock(&q->lock);
+
+    memcpy(entry, &q->buffer[q->entry_size * q->head], q->entry_size);
+    memset(&q->buffer[q->entry_size * q->head], 0, q->entry_size);
+    q->head = (q->head + 1) % q->depth;
+
+    pthread_mutex_unlock(&q->lock);
+    sem_post(&q->sem_space);
+}
+
+int
+queue_timed_get(struct queue * q, void * entry, const struct timespec * timeout) {
+
+    int rc = 0;
+
+    rc = sem_timedwait(&q->sem_work, timeout);
+    if (rc) {
+        return rc;
+    }
+
     pthread_mutex_lock(&q->lock);
 
     memcpy(entry, &q->buffer[q->entry_size * q->head], q->entry_size);

@@ -7,30 +7,40 @@
 #include "queue.h"
 
 #define PROG_NAME "exhaustive_ec_test"
-#define QUEUE_DEPTH (2)
 
-struct thread_data {
-    uint32_t k;
-    uint32_t p;
-};
-
-struct results {
-    uint64_t passed;
-    uint64_t failed;
-    pthread_mutex_t lock;
-};
+#define QUEUE_DEPTH (10)
+#define QUEUE_TIMEOUT_S (1)
 
 const char * usage = 
 "This program tests Erasure Code decoding for all combinations of bytes lost.\n\n"
 "usage: " PROG_NAME " k p l\n"
 "k: number of randomly generated input bytes\n"
 "p: number of parity bytes to generate\n"
-"l: number of bytes loss\n"
-"Example: " PROG_NAME " 4 2 2\n\n";
+"Example: " PROG_NAME " 4 2\n\n";
 
 const char * mem_err = "Error allocating memory.";
 
+/*
+ * Might be using more global variables than I should, but for a simple 
+ * program, this shortcut is ok.  Most of these are read-only after first set.
+ */
 struct queue * queue;
+
+uint8_t * ec_code;
+
+int work_done;
+
+struct thread_data {
+    uint32_t k;
+};
+
+struct thread_data thread_data;
+
+struct results {
+    uint64_t passed;
+    uint64_t failed;
+    pthread_mutex_t lock;
+};
 
 struct results res;
 
@@ -59,6 +69,7 @@ void print_array8(uint8_t * a, size_t len) {
  * comb (IN):  int array of length r to hold combinations passed into fcn()
  * pos (IN): position in comb[] to start in
  * start (IN): first index to use in combination
+ * counter (OUT): returns number of combinations found
  * fcn (IN): function to call when a combination is found
  * arg (IN): arg to pass to fcn() when called
  */
@@ -83,40 +94,98 @@ void combination(int n,
 }
 
 void signal_thread(int * array, int len, void * arg) {
+#if 0
     printf("Adding to queue: ");
     for (int i = 0; i < len; i++)
         printf("%d ", array[i]);
     printf("\n");
+#endif
     queue_put(queue, array);
 }
 
 void * decode_one(void * arg) {
-    int * loss_idx = 0;
-    struct thread_data * thread_data = arg;
+    int i = 0;
+    int * recv_idx = 0;
+    uint8_t * to_decode = 0;
+    uint8_t * decoded = 0;
 
-    printf("String thread...\n");
+    printf("Starting thread...\n");
 
-    loss_idx = malloc(sizeof(*loss_idx) * thread_data->k);
-    if (!loss_idx) {
+    recv_idx = malloc(sizeof(*recv_idx) * thread_data.k);
+    if (!recv_idx) {
         printf("%s\n", mem_err);
-        return 0;
+        goto decode_one_err;
+    }
+
+    to_decode = malloc(sizeof(*to_decode) * thread_data.k);
+    if (!to_decode) {
+        printf("%s\n", mem_err);
+        goto decode_one_err;
+    }
+
+    decoded = malloc(sizeof(*decoded) * thread_data.k);
+    if (!decoded) {
+        printf("%s\n", mem_err);
+        goto decode_one_err;
     }
 
     while (1) {
-        queue_get(queue, loss_idx);
-        printf("Received: ");
-        for (int i = 0; i < thread_data->p; i++) {
-            printf("%d ", loss_idx[i]);
+        int rc = 0;
+        struct timespec ts;
+
+        rc = clock_gettime(CLOCK_REALTIME, &ts);
+        if (rc) {
+            printf("Error getting time.\n");
+            goto decode_one_err;
         }
-        printf("\n");
+
+        ts.tv_sec += QUEUE_TIMEOUT_S;
+
+        rc = queue_timed_get(queue, recv_idx, &ts);
+        if (rc) {
+            // Check if work is done
+            if (work_done) {
+                break;
+            } else {
+                continue;
+            }
+        }
+
+        //printf("Received: ");
+        for (i = 0; i < thread_data.k; i++) {
+            //printf("%d ", recv_idx[i]);
+            to_decode[i] = ec_code[recv_idx[i]];
+        }
+        //printf("\n");
+
+        rc = ec_decode(to_decode, recv_idx, decoded);
+
+        if (rc) {
+            printf("Decode failed\n");
+        } else {
+            // Check decoded data
+            for (i = 0; i < thread_data.k; i++) {
+                if (ec_code[i] != decoded[i]) {
+                    printf("Error: Incorrect decoded data\n");
+                    rc = 1;
+                    break;
+                }
+            }
+        }
 
         pthread_mutex_lock(&res.lock);
-        res.passed++;
+        if (rc) {
+            res.failed++;
+        } else {
+            res.passed++;
+        }
         pthread_mutex_unlock(&res.lock);
     } // while (1)
 
-    free(loss_idx);
-
+decode_one_err:
+    free(decoded);
+    free(to_decode);
+    free(recv_idx);
     return 0;
 }
 
@@ -130,27 +199,21 @@ void rand_data_gen(uint8_t * data, size_t len) {
 int main(int argc, char* argv[]) {
     uint32_t k = 0;
     uint32_t p = 0;
-    uint32_t l = 0;
-    uint8_t * ec_code = 0;
-    uint8_t * input = 0;
-    uint8_t * result = 0;
     uint64_t counter = 0;
-    int * indices = 0;
-    int * loss_idx = 0;
+    int * recv_idx = 0;
     int i = 0;
     int num_threads = 0;
     int rc = 0;
-    struct thread_data thread_data;
+    pthread_t * threads = 0;
 
-    if (argc != 4) {
-        printf("Requires 3 parameters.\n\n");
+    if (argc != 3) {
+        printf("Requires 2 parameters.\n\n");
         printf("%s\n\n", usage);
         exit(1);
     }
 
     k = atoi(argv[1]);
     p = atoi(argv[2]);
-    l = atoi(argv[3]);
 
     // init erasure code module
     rc = ec_init(k, p);
@@ -181,27 +244,6 @@ int main(int argc, char* argv[]) {
     printf("Erasure Code:  ");
     print_array8(ec_code, k + p);
 
-    input = malloc(sizeof(*input) * k);
-    if (!input) {
-        printf("%s\n", mem_err);
-        rc = -1;
-        goto err;
-    }
-
-    indices = malloc(sizeof(*indices) * k);
-    if (!indices) {
-        printf("%s\n", mem_err);
-        rc = -1;
-        goto err;
-    }
-
-    result = malloc(sizeof(*result) * k);
-    if (!result) {
-        printf("%s\n", mem_err);
-        rc = -1;
-        goto err;
-    }
-
     // init queue which has built-in semaphore and mutex
     queue = queue_init(sizeof(int) * k, QUEUE_DEPTH);
     if (!queue) {
@@ -218,15 +260,22 @@ int main(int argc, char* argv[]) {
     }
 
     // start threads
-    num_threads = sysconf(_SC_NPROCESSORS_ONLN) - 1;
+    num_threads = sysconf(_SC_NPROCESSORS_ONLN);
     printf("Starting %d threads\n", num_threads);
 
     thread_data.k = k;
-    thread_data.p = p;
 
-    pthread_t * threads = malloc(sizeof(*threads) * num_threads);
+    work_done = 0;
+
+    threads = malloc(sizeof(*threads) * num_threads);
+    if (!threads) {
+        printf("%s\n", mem_err);
+        rc = -1;
+        goto err;
+    }
+
     for (i = 0; i < num_threads; i++) {
-        rc = pthread_create(&threads[i], NULL, decode_one, &thread_data);
+        rc = pthread_create(&threads[i], NULL, decode_one, NULL);
         if (rc) {
             printf("Error creating thread. (error=%d)\n", rc);
             goto err;
@@ -234,17 +283,19 @@ int main(int argc, char* argv[]) {
     }
 
     // generate combinations and signal to threads
-    printf("generate combinations, %d choose %d...\n", k, p);
-    loss_idx = malloc(sizeof(*loss_idx) * p);
-    if (!loss_idx) {
+    printf("generate combinations, %d choose %d...\n", k + p, k);
+    recv_idx = malloc(sizeof(*recv_idx) * k);
+    if (!recv_idx) {
         printf("%s\n", mem_err);
         rc = -1;
         goto err;
     }
 
-    combination(k, p, loss_idx, 0, 0, &counter, &signal_thread, NULL);
+    combination(k + p, k, recv_idx, 0, 0, &counter, &signal_thread, NULL);
 
     printf("%lu combinations found.\n", counter);
+
+    work_done = 1;
 
     // when we got all results, exit
     while (1) {
@@ -255,71 +306,21 @@ int main(int argc, char* argv[]) {
             break;
         }
         pthread_mutex_unlock(&res.lock);
-        printf("waiting...\n");
+        printf("Waiting for results...\n");
         sleep(2);
     }
 
-    // Just exist withing joining threads.
-#if 0
-    // join threads
-    printf("join threads\n");
     for (i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
-#endif
 
 err:
     // clean up
-    free(loss_idx);
+    free(recv_idx);
+    free(threads);
     queue_cleanup(queue);
-    free(result);
-    free(indices);
-    free(input);
     free(ec_code);
     ec_cleanup();
 
     return rc;
 }
-
-#if 0
-
-    // Pick k bytes out of the erasure code
-    for (i = 0; i < k; i++) {
-        int idx = 0;
-        int duplicate = 1; 
-        
-        while (duplicate) {
-            idx = rand() % (k + p);
-            duplicate = 0;
-            for (int j = 0; j < i; j++) {
-                if (idx == indices[j]) {
-                    duplicate = 1;
-                    break;
-                }
-            }
-        }
-
-        indices[i] = idx;
-        input[i] = ec_code[idx];
-    }
-
-    printf("Indices: ");
-    print_array(indices, k);
-
-    ec_decode(input, indices, result);
-
-    printf("Result: ");
-    print_array8(result, k);
-    
-    for (i = 0; i < k; i++)
-        if (ec_code[i] != result[i]) {
-            printf("ERROR: Incorrect decoded bytes.\n");
-            rc = -2;
-            goto err;
-        }
-    
-    printf("Decode successful!\n");
-
-
-}
-#endif

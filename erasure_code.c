@@ -30,7 +30,6 @@ cauchy_matrix_gen(struct gf_matrix * m) {
 void
 ec_cleanup() {
     gf_cleanup();
-
     gf_matrix_delete(ec.matrix);
 }
 

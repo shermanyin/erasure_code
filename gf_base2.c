@@ -82,7 +82,7 @@ gf_init(const uint32_t m, const uint32_t g) {
     gf.order = 1 << m;
 
     /* table is 2^m x 2^m entries */
-    gf.mult_tbl = malloc(sizeof(uint8_t) * gf.order * gf.order);
+    gf.mult_tbl = malloc(sizeof(*gf.mult_tbl) * gf.order * gf.order);
     if (!gf.mult_tbl) {
         printf("%s", mem_err);
         gf_cleanup();
@@ -94,7 +94,7 @@ gf_init(const uint32_t m, const uint32_t g) {
             gf.mult_tbl[row * gf.order + col] = gf_long_mult(row, col);
 
     /* table is 2^m x 1 entries */
-    gf.mult_inv_tbl = malloc(sizeof(uint8_t) * gf.order);
+    gf.mult_inv_tbl = malloc(sizeof(*gf.mult_inv_tbl) * gf.order);
     if (!gf.mult_inv_tbl) {
         printf("%s", mem_err);
         gf_cleanup();
@@ -212,13 +212,13 @@ gf_matrix_create(int rows, int cols) {
 
     int m_size = sizeof(uint8_t) * rows * cols;
     
-    struct gf_matrix * m = malloc(sizeof(struct gf_matrix));
+    struct gf_matrix * m = malloc(sizeof(*m));
     if (!m) {
         printf("%s\n", mem_err);
         return NULL;
     }
 
-    memset(m, 0, sizeof(struct gf_matrix));
+    memset(m, 0, sizeof(*m));
 
     m->rows = rows;
     m->cols = cols;
@@ -351,6 +351,8 @@ gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
         switch (m->v[pivot]) {
             case 0:
                 printf("Cannot find inverse for the following matrix:\n");
+                gf_matrix_print(x);
+                printf("Got up to here:\n");
                 gf_matrix_print(m);
                 rc = -1;
                 goto inv_err;
