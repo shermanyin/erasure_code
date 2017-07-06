@@ -28,6 +28,17 @@ cauchy_matrix_gen(struct gf_matrix * m) {
 }
 
 void
+rs_matrix_gen(struct gf_matrix * m) {
+    // top rows form the identity matrix
+    gf_matrix_identity_set(m);
+
+    // calculate bottom rows
+    for (int r = m->cols; r < m->rows; r++)
+        for (int c = 0; c < m->cols; c++)
+            m->v[r * m->cols + c] = gf_pow(2, (r - m->cols) * c);
+}
+
+void
 ec_cleanup() {
     gf_cleanup();
     gf_matrix_delete(ec.matrix);
@@ -55,7 +66,8 @@ ec_init(const uint32_t k, const uint32_t p) {
         return -1;
     }
 
-    cauchy_matrix_gen(ec.matrix);
+    //cauchy_matrix_gen(ec.matrix);
+    rs_matrix_gen(ec.matrix);
 
     printf("Erasure Code module initialized.\n");
 
