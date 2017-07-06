@@ -10,6 +10,7 @@
 
 #define QUEUE_DEPTH (10)
 #define QUEUE_TIMEOUT_S (1)
+#define STATUS_INTERVAL_S (2)
 
 const char * usage = 
 "This program tests Erasure Code decoding for all combinations of bytes lost.\n\n"
@@ -34,9 +35,12 @@ struct thread_data {
     uint32_t k;
 };
 
+pthread_t status_thread;
+
 struct thread_data thread_data;
 
 struct results {
+    uint64_t total;
     uint64_t passed;
     uint64_t failed;
     pthread_mutex_t lock;
@@ -69,7 +73,6 @@ void print_array8(uint8_t * a, size_t len) {
  * comb (IN):  int array of length r to hold combinations passed into fcn()
  * pos (IN): position in comb[] to start in
  * start (IN): first index to use in combination
- * counter (OUT): returns number of combinations found
  * fcn (IN): function to call when a combination is found
  * arg (IN): arg to pass to fcn() when called
  */
@@ -78,19 +81,34 @@ void combination(int n,
                  int * comb,
                  int pos,
                  int start,
-                 uint64_t * counter,
                  void (*fcn)(int *, int, void *),
                  void * arg) {
     if (pos == r) {
         (*fcn)(comb, r, arg);
-        (*counter)++;
         return;
     }
 
     for (int i = start; i <= n - r + pos; i++) {
         comb[pos] = i;
-        combination(n, r, comb, pos + 1, i + 1, counter, fcn, arg);
+        combination(n, r, comb, pos + 1, i + 1, fcn, arg);
     }
+}
+
+uint64_t
+num_combination(int n, int r){
+    uint64_t top = 1;
+    uint64_t bottom = 1;
+
+    int larger = (n - r > r) ? n - r : r;
+
+    for (int i = n; i > larger; i--) {
+        top *= i;
+    }
+    for (int i = (n - larger); i > 1; i--) {
+        bottom *= i;
+    }
+
+    return top / bottom;
 }
 
 void signal_thread(int * array, int len, void * arg) {
@@ -101,6 +119,30 @@ void signal_thread(int * array, int len, void * arg) {
     printf("\n");
 #endif
     queue_put(queue, array);
+}
+
+void * status(void * arg) {
+    while (1) {
+        uint64_t total = 0;
+        uint64_t passed = 0;
+        uint64_t failed = 0;
+
+        pthread_mutex_lock(&res.lock);
+        total = res.total;
+        passed = res.passed;
+        failed = res.failed;
+        pthread_mutex_unlock(&res.lock);
+
+        printf("%lu passed, %lu failed, %lu total. %0.1f%% complete.\n",
+            passed, failed, total, (double)((passed + failed) / total * 100));
+
+        if (passed + failed >= total) {
+            // We're done
+            break;
+        }
+
+        sleep(STATUS_INTERVAL_S);
+    }
 }
 
 void * decode_one(void * arg) {
@@ -199,7 +241,6 @@ void rand_data_gen(uint8_t * data, size_t len) {
 int main(int argc, char* argv[]) {
     uint32_t k = 0;
     uint32_t p = 0;
-    uint64_t counter = 0;
     int * recv_idx = 0;
     int i = 0;
     int num_threads = 0;
@@ -259,7 +300,15 @@ int main(int argc, char* argv[]) {
         goto err;
     }
 
-    // start threads
+    // start status thread
+    res.total = num_combination(k + p, k);
+    rc = pthread_create(&status_thread, NULL, status, NULL);
+    if (rc) {
+        printf("Error creating thread. (error=%d)\n", rc);
+        goto err;
+    }
+
+    // start worker threads
     num_threads = sysconf(_SC_NPROCESSORS_ONLN);
     printf("Starting %d threads\n", num_threads);
 
@@ -291,16 +340,14 @@ int main(int argc, char* argv[]) {
         goto err;
     }
 
-    combination(k + p, k, recv_idx, 0, 0, &counter, &signal_thread, NULL);
-
-    printf("%lu combinations found.\n", counter);
+    combination(k + p, k, recv_idx, 0, 0, &signal_thread, NULL);
 
     work_done = 1;
 
     // when we got all results, exit
     while (1) {
         pthread_mutex_lock(&res.lock);
-        if (res.passed + res.failed >= counter) {
+        if (res.passed + res.failed >= res.total) {
             printf("Results: %lu of %lu passed.\n",
                    res.passed, res.passed + res.failed);
             break;
