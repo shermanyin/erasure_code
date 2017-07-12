@@ -38,6 +38,73 @@ rs_matrix_gen(struct gf_matrix * m) {
             m->v[r * m->cols + c] = gf_pow(2, (r - m->cols) * c);
 }
 
+int
+vandermonde_matrix_gen(struct gf_matrix * m) {
+    uint8_t mult_inv = 0;
+
+    // create the vandermonde matrix
+    for (int r = 0; r < m->rows; r++)
+        for (int c = 0; c < m->cols; c++)
+            m->v[r * m->cols + c] = gf_pow(r, c);
+
+    printf("Vandermonde matrix b4 transformation:\n");
+    gf_matrix_print(m);
+
+    // transform matrix to get identity matrix for the top k rows
+    // note: use column transformations.  row transformation result
+    // in a matrix that is sometimes non-invertible.
+    for (int col = 0; col < m->cols; col++) {
+        // index of the pivot
+        int pivot = col * m->cols + col;
+
+        // if the pivot is zero, find another col to swap
+        if (!m->v[pivot]) {
+            for (int col2 = col + 1; col2 < m->cols; col2++) {
+                if (m->v[col * m->cols + col2]) {
+                    gf_matrix_swap_cols(m, col, col2);
+                    break;
+                }
+            }
+        }
+
+        switch (m->v[pivot]) {
+            case 0:
+                printf("Cannot properly transform Vandermonde matrix:\n");
+                gf_matrix_print(m);
+                return -1;
+
+            case 1:
+                // no-op
+                break;
+
+            default:
+                // scale col i so pivot is 1
+                mult_inv = gf_mult_inv(m->v[pivot]);
+                for (int row = 0; row < m->rows; row++) {
+                    int idx = row * m->cols + col;
+                    m->v[idx] = gf_mult(mult_inv, m->v[idx]);
+                }
+        } // switch pivot value
+
+        // zero out the ith row in other cols 
+        for (int col2 = 0; col2 < m->cols; col2++) {
+            uint8_t scale = 0;
+
+            // skip the current col
+            if (col2 == col)
+                continue;
+
+            scale = m->v[col * m->cols + col2];
+            for (int row = 0; row < m->rows; row++) {
+                m->v[row * m->cols + col2]
+                    = gf_add(m->v[row * m->cols + col2], gf_mult(scale, m->v[row * m->cols + col]));
+            }
+        }
+    } // for the top square matrix
+
+    return 0;
+}
+
 void
 ec_cleanup() {
     gf_cleanup();
@@ -67,7 +134,15 @@ ec_init(const uint32_t k, const uint32_t p) {
     }
 
     //cauchy_matrix_gen(ec.matrix);
-    rs_matrix_gen(ec.matrix);
+    //rs_matrix_gen(ec.matrix);
+    rc = vandermonde_matrix_gen(ec.matrix);
+    if (rc) {
+        printf("Error generating encoding matrix.\n");
+        return rc;
+    }
+
+    printf("Encoding matrix:\n");
+    gf_matrix_print(ec.matrix);
 
     printf("Erasure Code module initialized.\n");
 
@@ -132,6 +207,16 @@ ec_decode(uint8_t * input, int * indices, uint8_t * result) {
     rc = gf_matrix_inv(decode_m, decode_inv_m); 
     if (rc) {
         printf("Error decoding - cannot find inverse of encoding matrix.\n");
+        printf("Input was:\n");
+        for (int i = 0; i < ec.k; i++) {
+            printf("%02x ", input[i]);
+        }
+        printf("\n");
+        printf("Indices was:\n");
+        for (int i = 0; i < ec.k; i++) {
+            printf("%d ", indices[i]);
+        }
+        printf("\n");
         goto decode_err;
     }
 

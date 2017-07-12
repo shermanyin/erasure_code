@@ -34,6 +34,10 @@ struct gf_matrix * gf_matrix_create_from(struct gf_matrix * x);
 
 void gf_matrix_delete(struct gf_matrix * x);
 
+void gf_matrix_swap_rows(struct gf_matrix * x, int row1, int row2);
+
+void gf_matrix_swap_cols(struct gf_matrix * x, int col1, int col2);
+
 void gf_matrix_print(struct gf_matrix * x);
 
 /*

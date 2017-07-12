@@ -313,6 +313,17 @@ gf_matrix_swap_rows(struct gf_matrix * x, int row1, int row2) {
     }
 }
 
+void
+gf_matrix_swap_cols(struct gf_matrix * x, int col1, int col2) {
+    uint8_t temp = 0;
+
+    for (int i = 0; i < x->rows; i++) {
+        temp = x->v[i * x->cols + col1];
+        x->v[i * x->cols + col1] = x->v[i * x->cols + col2];
+        x->v[i * x->cols + col2] = temp;
+    }
+}
+
 int
 gf_matrix_inv(struct gf_matrix * x, struct gf_matrix * inv) {
     int rc = 0;
